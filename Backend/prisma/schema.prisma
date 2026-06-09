@@ -1,0 +1,277 @@
+// ============================================================
+// Prisma Schema — Personal Training Management Platform
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum Role {
+  HEAD_TRAINER
+  TRAINER
+  CLIENT
+}
+
+enum UserStatus {
+  ACTIVE
+  PENDING_APPROVAL
+  SUSPENDED
+}
+
+enum BookingStatus {
+  BOOKED
+  COMPLETED
+  CANCELLED
+  RESCHEDULED
+}
+
+enum LimitType {
+  WEEKLY
+  MONTHLY
+}
+
+enum ExceptionType {
+  BLOCKED
+  EXTRA_AVAILABLE
+}
+
+// FIX: was plain String — now a proper enum
+enum PackageStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+}
+
+// ============================================================
+// USER & PROFILES
+// ============================================================
+
+model User {
+  id           String     @id @default(uuid())
+  name         String
+  email        String     @unique
+  passwordHash String?
+  googleId     String?    @unique
+  role         Role
+  status       UserStatus @default(ACTIVE)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt // ADDED: track record changes
+
+  trainerProfile TrainerProfile?
+  clientProfile  ClientProfile?
+
+  trainerBookings Booking[] @relation("TrainerBookings")
+  clientBookings  Booking[] @relation("ClientBookings")
+
+  trainerAssignments ClientTrainerAssignment[] @relation("TrainerAssignments")
+  clientAssignments  ClientTrainerAssignment[] @relation("ClientAssignments")
+
+  sessionAllowances ClientSessionAllowance[]
+  packages          ClientPackage[]
+
+  // FIX: named relations added to resolve Prisma ambiguity
+  trainerAvailabilities TrainerAvailability[]    @relation("TrainerAvailabilities")
+  availabilityExceptions AvailabilityException[] @relation("TrainerExceptions")
+
+  // ADDED: track which head trainer sent invitations
+  sentInvitations TrainerInvitation[] @relation("InvitedBy")
+
+  // ADDED: track which head trainer created workout plans
+  createdWorkoutPlans WorkoutPlan[] @relation("CreatedByTrainer")
+}
+
+model TrainerProfile {
+  id              String  @id @default(uuid())
+  userId          String  @unique
+  specialization  String?
+  experienceYears Int?
+  bio             String? // ADDED: useful for client-facing profiles
+  isApproved      Boolean @default(false)
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model ClientProfile {
+  id      String  @id @default(uuid())
+  userId  String  @unique
+  weight  Float?
+  height  Float?  // ADDED: useful for fitness tracking
+  notes   String?
+  phone   String?
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+// ============================================================
+// TRAINER INVITATIONS
+// ============================================================
+
+model TrainerInvitation {
+  id          String   @id @default(uuid())
+  email       String
+  token       String   @unique
+  expiresAt   DateTime
+  used        Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  // ADDED: which head trainer sent this invite
+  invitedById String
+  invitedBy   User     @relation("InvitedBy", fields: [invitedById], references: [id])
+}
+
+// ============================================================
+// TRAINER AVAILABILITY
+// ============================================================
+
+// FIX: startTime/endTime changed from DateTime to String (e.g. "09:00")
+// DateTime was wrong here — this is recurring weekly availability,
+// not a specific point in time. Store as "HH:MM" 24hr format.
+model TrainerAvailability {
+  id        String @id @default(uuid())
+  trainerId String
+  dayOfWeek Int    // 0 = Sunday, 6 = Saturday
+  startTime String // e.g. "06:00"
+  endTime   String // e.g. "11:00"
+
+  // FIX: named relation to resolve User model ambiguity
+  trainer User @relation("TrainerAvailabilities", fields: [trainerId], references: [id])
+
+  @@index([trainerId, dayOfWeek])
+}
+
+// FIX: removed redundant `date` field — startTime and endTime as full
+// DateTime values already encode the date. Use these for range queries.
+model AvailabilityException {
+  id        String        @id @default(uuid())
+  trainerId String
+  startTime DateTime      // full timestamp, e.g. 2025-06-10T00:00:00Z
+  endTime   DateTime      // full timestamp, e.g. 2025-06-10T23:59:00Z
+  type      ExceptionType
+  note      String?       // ADDED: optional reason (e.g. "Holiday", "Extra slot")
+
+  // FIX: named relation to resolve User model ambiguity
+  trainer User @relation("TrainerExceptions", fields: [trainerId], references: [id])
+
+  @@index([trainerId, startTime])
+}
+
+// ============================================================
+// WORKOUT PLANS
+// ============================================================
+
+model WorkoutPlan {
+  id          String   @id @default(uuid())
+  title       String
+  description String?
+  fileUrl     String?
+  createdAt   DateTime @default(now())
+
+  // ADDED: track who created this plan (should always be HEAD_TRAINER)
+  createdById String
+  createdBy   User     @relation("CreatedByTrainer", fields: [createdById], references: [id])
+
+  assignments ClientTrainerAssignment[]
+}
+
+// ============================================================
+// CLIENT–TRAINER ASSIGNMENT
+// ============================================================
+
+model ClientTrainerAssignment {
+  id            String   @id @default(uuid())
+  clientId      String
+  trainerId     String
+  workoutPlanId String?
+  active        Boolean  @default(true)
+  assignedAt    DateTime @default(now()) // ADDED: when was this assignment made
+  updatedAt     DateTime @updatedAt      // ADDED: track deactivations/changes
+
+  client  User         @relation("ClientAssignments", fields: [clientId], references: [id])
+  trainer User         @relation("TrainerAssignments", fields: [trainerId], references: [id])
+  workout WorkoutPlan? @relation(fields: [workoutPlanId], references: [id])
+
+  // ADDED: fast lookup by client+trainer pair
+  @@index([clientId, trainerId])
+}
+
+// ============================================================
+// BOOKINGS
+// ============================================================
+
+model Booking {
+  id              String        @id @default(uuid())
+  clientId        String
+  trainerId       String
+  startTime       DateTime
+  endTime         DateTime
+  status          BookingStatus @default(BOOKED)
+  rescheduledFrom String?
+  notes           String?
+  createdAt       DateTime      @default(now()) // ADDED
+  updatedAt       DateTime      @updatedAt      // ADDED
+
+  client   User     @relation("ClientBookings", fields: [clientId], references: [id])
+  trainer  User     @relation("TrainerBookings", fields: [trainerId], references: [id])
+  previous Booking? @relation("RescheduleLink", fields: [rescheduledFrom], references: [id])
+  next     Booking[] @relation("RescheduleLink")
+
+  @@index([trainerId, startTime, endTime])
+  @@index([clientId, startTime])
+}
+
+// ============================================================
+// SESSION ALLOWANCES
+// ============================================================
+
+model ClientSessionAllowance {
+  id          String    @id @default(uuid())
+  clientId    String
+  limitType   LimitType
+  maxSessions Int?
+  isUnlimited Boolean   @default(false)
+  startDate   DateTime
+  endDate     DateTime?
+  createdAt   DateTime  @default(now())
+
+  client User @relation(fields: [clientId], references: [id])
+
+  // ADDED: fast lookup when enforcing limits during booking
+  @@index([clientId])
+}
+
+// ============================================================
+// PACKAGES (future)
+// ============================================================
+
+model PackageType {
+  id              String  @id @default(uuid())
+  name            String
+  description     String?
+  defaultSessions Int?
+  validityDays    Int?
+
+  clientPackages ClientPackage[]
+}
+
+model ClientPackage {
+  id            String        @id @default(uuid())
+  clientId      String
+  packageTypeId String
+  sessionsUsed  Int           @default(0)
+  startDate     DateTime
+  expiryDate    DateTime
+  status        PackageStatus @default(ACTIVE) // FIX: was plain String
+
+  client  User        @relation(fields: [clientId], references: [id])
+  package PackageType @relation(fields: [packageTypeId], references: [id])
+}
