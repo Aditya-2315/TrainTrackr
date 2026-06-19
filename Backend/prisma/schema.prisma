@@ -175,7 +175,7 @@ model WorkoutPlan {
   description String?
   fileUrl     String?
   createdAt   DateTime @default(now())
-
+  filePublicId String? 
   // ADDED: track who created this plan (should always be HEAD_TRAINER)
   createdById String
   createdBy   User     @relation("CreatedByTrainer", fields: [createdById], references: [id])

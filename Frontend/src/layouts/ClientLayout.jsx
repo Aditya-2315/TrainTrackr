@@ -12,6 +12,7 @@ import BookSessionPage from "../pages/client/BookSessionPage";
 import MyBookingsPage from "../pages/client/MyBookingsPage";
 import WorkoutPlanPage from "../pages/client/WorkoutPlanPage";
 import ClientProfilePage from "../pages/client/ClientProfilePage";
+import OfflineAwareLayout from "../components/shared/OfflineAwareLayout";
 
 const navItems = [
   { to: "/client/dashboard", icon: LayoutDashboard, label: "Home" },
@@ -26,6 +27,7 @@ export default function ClientLayout() {
     <div className="min-h-screen bg-gray-50 flex flex-col">
       {/* Page content — bottom padding so content clears the nav bar */}
       <main className="flex-1 pb-20">
+        <OfflineAwareLayout>
         <Routes>
           <Route index element={<Navigate to="dashboard" replace />} />
           <Route path="dashboard" element={<ClientDashboard />} />
@@ -34,6 +36,7 @@ export default function ClientLayout() {
           <Route path="workout" element={<WorkoutPlanPage />} />
           <Route path="profile" element={<ClientProfilePage />} />
         </Routes>
+        </OfflineAwareLayout>
       </main>
 
       {/* Bottom navigation — mobile only layout, fixed to viewport bottom */}

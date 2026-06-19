@@ -10,8 +10,6 @@ export const createBooking = async (req, res, next) => {
   try {
     const role = req.user.role;
 
-    // HEAD_TRAINER books on behalf of a client — clientId required in body
-    // CLIENT books for themselves
     let clientId;
     if (role === "HEAD_TRAINER") {
       if (!req.body.clientId) {
@@ -24,7 +22,6 @@ export const createBooking = async (req, res, next) => {
 
     const { startTime, endTime } = req.body;
 
-    // Find the active assignment for this client
     const assignment = await prisma.clientTrainerAssignment.findFirst({
       where: { clientId, active: true },
     });
@@ -34,13 +31,11 @@ export const createBooking = async (req, res, next) => {
 
     const trainerId = assignment.trainerId;
 
-    // Availability check
     const available = await checkTrainerAvailability(trainerId, startTime, endTime);
     if (!available) {
       return next(new ApiError("Trainer is not available at the requested time", 400));
     }
 
-    // Overlap check
     const overlap = await prisma.booking.findFirst({
       where: {
         trainerId,
@@ -54,64 +49,44 @@ export const createBooking = async (req, res, next) => {
       return next(new ApiError("Trainer already has a booking in this time slot", 409));
     }
 
-    // In createBooking, replace the checkSessionLimit call with this:
-const now = new Date();
-const activeAllowance = await prisma.clientSessionAllowance.findFirst({
-  where: {
-    clientId,
-    startDate: { lte: now },
-    OR: [{ endDate: null }, { endDate: { gte: now } }],
-  },
-});
-
-if (!activeAllowance) {
-  return next(
-    new ApiError(403, "No session allowance has been set. Contact your trainer.")
-  );
-}
-
-// Only enforce the cap if NOT unlimited
-if (!activeAllowance.isUnlimited) {
-  const sessionsUsed = await prisma.booking.count({
-    where: {
-      clientId,
-      startTime: {
-        gte: activeAllowance.startDate,
-        ...(activeAllowance.endDate && { lte: activeAllowance.endDate }),
+    // ── Allowance check ──
+    const now = new Date();
+    const activeAllowance = await prisma.clientSessionAllowance.findFirst({
+      where: {
+        clientId,
+        startDate: { lte: now },
+        OR: [{ endDate: null }, { endDate: { gte: now } }],
       },
-      status: { in: ["BOOKED", "COMPLETED"] },
-    },
-  });
+      orderBy: { createdAt: "desc" },
+    });
 
-  if (sessionsUsed >= activeAllowance.maxSessions) {
-    return next(
-      new ApiError(
-        403,
-        `Session limit reached. You've used ${sessionsUsed} of ${activeAllowance.maxSessions} sessions.`
-      )
-    );
-  }
-}
-// Unlimited clients fall through here with no cap check
-const sessionsUsed = await prisma.booking.count({
-  where: {
-    clientId,
-    startTime: {
-      gte: activeAllowance.startDate,
-      ...(activeAllowance.endDate && { lte: activeAllowance.endDate }),
-    },
-    status: { in: ["BOOKED", "COMPLETED"] },
-  },
-});
+    if (!activeAllowance) {
+      return next(
+        new ApiError(403, "No session allowance has been set. Contact your trainer.")
+      );
+    }
 
-if (sessionsUsed >= activeAllowance.maxSessions) {
-  return next(
-    new ApiError(
-      403,
-      `Session limit reached. You've used ${sessionsUsed} of ${activeAllowance.maxSessions} sessions.`
-    )
-  );
-}
+    // Always compute usage — needed for the response stats either way
+    const sessionsUsed = await prisma.booking.count({
+      where: {
+        clientId,
+        startTime: {
+          gte: activeAllowance.startDate,
+          ...(activeAllowance.endDate && { lte: activeAllowance.endDate }),
+        },
+        status: { in: ["BOOKED", "COMPLETED"] },
+      },
+    });
+
+    // Only enforce the cap if NOT unlimited
+    if (!activeAllowance.isUnlimited && sessionsUsed >= activeAllowance.maxSessions) {
+      return next(
+        new ApiError(
+          403,
+          `Session limit reached. You've used ${sessionsUsed} of ${activeAllowance.maxSessions} sessions.`
+        )
+      );
+    }
 
     const booking = await prisma.booking.create({
       data: {
@@ -130,7 +105,14 @@ if (sessionsUsed >= activeAllowance.maxSessions) {
     res.status(201).json({
       success: true,
       booking,
-      sessionStats: limitCheck.stats,
+      sessionStats: {
+        sessionsUsed: sessionsUsed + 1,
+        isUnlimited: activeAllowance.isUnlimited,
+        maxSessions: activeAllowance.maxSessions,
+        sessionsRemaining: activeAllowance.isUnlimited
+          ? null
+          : Math.max(0, activeAllowance.maxSessions - (sessionsUsed + 1)),
+      },
     });
   } catch (err) {
     next(err);

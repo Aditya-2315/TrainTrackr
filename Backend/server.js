@@ -12,6 +12,7 @@ import headRoutes from "./routes/head.routes.js"
 import clientRoutes from "./routes/client.routes.js"
 import bookingRoutes from "./routes/booking.routes.js"
 import errorHandler from "./middleware/error.middleware.js";
+import cookieParser from "cookie-parser";
 
 dotenv.config();
 const app = express()
@@ -20,7 +21,7 @@ app.use(helmet())
 app.use(morgan("dev"))
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
+app.use(cookieParser())
 app.use(
     session({
         secret: process.env.JWT_SECRET,

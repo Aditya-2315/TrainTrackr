@@ -10,6 +10,11 @@ import toast from "react-hot-toast";
 import { format, parseISO } from "date-fns";
 import { Plus, Pencil, Trash2, FileText, X, ExternalLink } from "lucide-react";
 
+function getViewableUrl(url) {
+  if (!url || !url.includes("cloudinary.com")) return url;
+  return url.replace("/upload/", "/upload/fl_inline/");
+}
+
 function PlanModal({ mode, initial, onClose, onSubmit, isPending }) {
   const [title, setTitle] = useState(initial?.title || "");
   const [description, setDescription] = useState(initial?.description || "");
@@ -207,7 +212,7 @@ export default function WorkoutPlansPage() {
                 </p>
                 {plan.fileUrl && (
                   <a
-                    href={plan.fileUrl}
+                    href={getViewableUrl(plan.fileUrl)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="flex items-center gap-1.5 text-xs font-medium text-gray-700 hover:text-gray-900 transition-colors"

@@ -18,6 +18,7 @@ import MyClientsPage from "../pages/trainer/MyClientsPage";
 import SessionHistoryPage from "../pages/trainer/SessionHistoryPage";
 import TrainerProfilePage from "../pages/trainer/TrainerProfilePage";
 import { useAuth } from "../context/AuthContext";
+import OfflineAwareLayout from "../components/shared/OfflineAwareLayout";
 
 const navItems = [
   { to: "/trainer/dashboard", icon: LayoutDashboard, label: "Dashboard" },
@@ -144,6 +145,7 @@ export default function TrainerLayout() {
         </header>
 
         <main className="flex-1 pb-20 md:pb-0">
+          <OfflineAwareLayout>
           <Routes>
             <Route index element={<Navigate to="dashboard" replace />} />
             <Route path="dashboard" element={<TrainerDashboard />} />
@@ -153,6 +155,7 @@ export default function TrainerLayout() {
             <Route path="history" element={<SessionHistoryPage />} />
             <Route path="profile" element={<TrainerProfilePage />} />
           </Routes>
+          </OfflineAwareLayout>
         </main>
       </div>
 

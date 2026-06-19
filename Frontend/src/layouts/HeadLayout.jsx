@@ -24,6 +24,7 @@ import AvailabilityPage from "../pages/trainer/AvailabilityPage";
 import SchedulePage from "../pages/trainer/SchedulePage";
 import HeadBookSessionPage from "../pages/head/HeadBookSessionPage";
 import { useAuth } from "../context/AuthContext";
+import OfflineAwareLayout from "../components/shared/OfflineAwareLayout";
 
 const navItems = [
   { to: "/head/dashboard", icon: LayoutDashboard, label: "Dashboard" },
@@ -189,6 +190,7 @@ export default function HeadLayout() {
         </header>
 
         <main className="flex-1">
+          <OfflineAwareLayout>
           <Routes>
             <Route index element={<Navigate to="dashboard" replace />} />
             <Route path="dashboard" element={<HeadDashboard />} />
@@ -201,6 +203,7 @@ export default function HeadLayout() {
             <Route path="availability" element={<AvailabilityPage />} />
             <Route path="book" element={<HeadBookSessionPage />} />
           </Routes>
+          </OfflineAwareLayout>
         </main>
       </div>
     </div>

@@ -11,8 +11,12 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     const token = getToken();
     if (!token) { setLoading(false); return; }
+    console.log("token on mount:", token);
     getMe()
-      .then((data) => setUser(data.user))
+      .then((data) => {setUser(data.user)
+        console.log("getMe response:", data);
+      })
+      
       .catch(() => removeToken())
       .finally(() => setLoading(false));
   }, []);

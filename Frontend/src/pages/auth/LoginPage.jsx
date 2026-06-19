@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -6,7 +7,6 @@ import { useNavigate, Link } from "react-router-dom";
 import toast from "react-hot-toast";
 import { login as loginApi } from "../../api/auth.api";
 import { useAuth } from "../../context/AuthContext";
-import { useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
 
 const schema = z.object({
@@ -14,10 +14,23 @@ const schema = z.object({
   password: z.string().min(1, "Password is required"),
 });
 
+const ROLE_MAP = {
+  CLIENT: "/client/dashboard",
+  TRAINER: "/trainer/dashboard",
+  HEAD_TRAINER: "/head/dashboard",
+};
+
 export default function LoginPage() {
-  const { login } = useAuth();
+  const { login, user, loading } = useAuth();
   const navigate = useNavigate();
   const [showPassword, setShowPassword] = useState(false);
+
+  // If already authenticated, skip login and go straight to dashboard
+  useEffect(() => {
+    if (!loading && user) {
+      navigate(ROLE_MAP[user.role] || "/", { replace: true });
+    }
+  }, [user, loading]);
 
   const {
     register,
@@ -29,17 +42,21 @@ export default function LoginPage() {
     mutationFn: loginApi,
     onSuccess: (data) => {
       login(data.token, data.user);
-      const map = {
-        CLIENT: "/client/dashboard",
-        TRAINER: "/trainer/dashboard",
-        HEAD_TRAINER: "/head/dashboard",
-      };
-      navigate(map[data.user.role] || "/");
+      navigate(ROLE_MAP[data.user.role] || "/");
     },
     onError: (err) => {
       toast.error(err.response?.data?.message || "Login failed");
     },
   });
+
+  // Show spinner while checking existing token — prevents login form flash
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-white">
+        <div className="w-8 h-8 border-2 border-gray-900 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex flex-col justify-center px-6 py-12 bg-white">
@@ -63,36 +80,29 @@ export default function LoginPage() {
             )}
           </div>
 
-         <div>
-  <label className="block text-sm font-medium text-gray-700 mb-1">
-    Password
-  </label>
-
-  <div className="relative">
-    <input
-      type={showPassword ? "text" : "password"} // 🔥 toggle here
-      autoComplete="current-password"
-      className={`w-full rounded-xl border px-4 py-3 pr-10 text-sm outline-none transition focus:ring-2 focus:ring-gray-900 ${
-        errors.password ? "border-red-400" : "border-gray-200"
-      }`}
-      {...register("password")}
-    />
-
-    <button
-      type="button"
-      onClick={() => setShowPassword((prev) => !prev)}
-      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-    >
-      {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-    </button>
-  </div>
-
-  {errors.password && (
-    <p className="text-xs text-red-500 mt-1">
-      {errors.password.message}
-    </p>
-  )}
-</div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+            <div className="relative">
+              <input
+                type={showPassword ? "text" : "password"}
+                autoComplete="current-password"
+                className={`w-full rounded-xl border px-4 py-3 pr-11 text-sm outline-none transition focus:ring-2 focus:ring-gray-900 ${
+                  errors.password ? "border-red-400" : "border-gray-200"
+                }`}
+                {...register("password")}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((s) => !s)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-700 transition-colors"
+              >
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+            {errors.password && (
+              <p className="text-xs text-red-500 mt-1">{errors.password.message}</p>
+            )}
+          </div>
 
           <button
             type="submit"
@@ -105,7 +115,10 @@ export default function LoginPage() {
 
         <p className="text-sm text-center text-gray-500 mt-6">
           New client?{" "}
-          <Link to="/register" className="text-gray-900 font-medium underline underline-offset-2">
+          <Link
+            to="/register"
+            className="text-gray-900 font-medium underline underline-offset-2"
+          >
             Create an account
           </Link>
         </p>

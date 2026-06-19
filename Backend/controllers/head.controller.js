@@ -2,6 +2,7 @@ import prisma from "../config/prisma.js";
 import ApiError from "../utils/ApiError.js";
 import { getSessionUsage } from "../utils/checkSessionLimit.js";
 import fs from "fs";
+import cloudinary from "../config/cloudinary.js";
 
 // ============================================================
 // CLIENT MANAGEMENT
@@ -358,31 +359,34 @@ export const createWorkoutPlan = async (req, res, next) => {
   try {
     const { title, description } = req.body;
 
-    if (!title) {
-      throw new ApiError(400, "Title is required.");
-    }
+    if (!title) throw new ApiError(400, "Title is required.");
 
-    // If a file was uploaded, build the URL
-    let fileUrl = null;
-    if (req.file) {
-      fileUrl = `${req.protocol}://${req.get("host")}/uploads/workout-plans/${req.file.filename}`;
-    }
+    // Cloudinary URL comes from req.file.path when using multer-storage-cloudinary
+    const fileUrl = req.file ? req.file.path : null;
+    // Cloudinary public_id needed later for deletion
+    const filePublicId = req.file ? req.file.filename : null;
 
     const plan = await prisma.workoutPlan.create({
       data: {
         title,
         description: description || null,
         fileUrl,
+        filePublicId,   // store so we can delete from Cloudinary later
         createdById: req.user.id,
+      },
+      include: {
+        createdBy: { select: { id: true, name: true } },
       },
     });
 
-    res.status(201).json({
-      success: true,
-      message: "Workout plan created.",
-      plan,
-    });
+    res.status(201).json({ success: true, plan });
   } catch (err) {
+    // If Cloudinary upload succeeded but DB write failed, clean up the orphaned file
+    if (req.file?.filename) {
+      await cloudinary.uploader.destroy(req.file.filename, {
+        resource_type: "raw",
+      }).catch(() => {}); // fire and forget
+    }
     next(err);
   }
 };
@@ -395,22 +399,20 @@ export const updateWorkoutPlan = async (req, res, next) => {
     const { title, description } = req.body;
 
     const existing = await prisma.workoutPlan.findUnique({ where: { id } });
-    if (!existing) {
-      throw new ApiError(404, "Workout plan not found.");
-    }
+    if (!existing) throw new ApiError(404, "Workout plan not found.");
 
-    // If a new file was uploaded, delete the old one and set new URL
     let fileUrl = existing.fileUrl;
+    let filePublicId = existing.filePublicId;
+
     if (req.file) {
-      // Delete old file if it exists locally
-      if (existing.fileUrl) {
-        const oldFilename = existing.fileUrl.split("/uploads/workout-plans/")[1];
-        const oldPath = `uploads/workout-plans/${oldFilename}`;
-        if (oldFilename && fs.existsSync(oldPath)) {
-          fs.unlinkSync(oldPath);
-        }
+      // Delete old file from Cloudinary if one existed
+      if (existing.filePublicId) {
+        await cloudinary.uploader.destroy(existing.filePublicId, {
+          resource_type: "raw",
+        }).catch(() => {}); // don't block update if deletion fails
       }
-      fileUrl = `${req.protocol}://${req.get("host")}/uploads/workout-plans/${req.file.filename}`;
+      fileUrl = req.file.path;
+      filePublicId = req.file.filename;
     }
 
     const plan = await prisma.workoutPlan.update({
@@ -419,11 +421,20 @@ export const updateWorkoutPlan = async (req, res, next) => {
         ...(title && { title }),
         ...(description !== undefined && { description }),
         fileUrl,
+        filePublicId,
+      },
+      include: {
+        createdBy: { select: { id: true, name: true } },
       },
     });
 
-    res.json({ success: true, message: "Workout plan updated.", plan });
+    res.json({ success: true, plan });
   } catch (err) {
+    if (req.file?.filename) {
+      await cloudinary.uploader.destroy(req.file.filename, {
+        resource_type: "raw",
+      }).catch(() => {});
+    }
     next(err);
   }
 };
@@ -435,29 +446,13 @@ export const deleteWorkoutPlan = async (req, res, next) => {
     const { id } = req.params;
 
     const plan = await prisma.workoutPlan.findUnique({ where: { id } });
-    if (!plan) {
-      throw new ApiError(404, "Workout plan not found.");
-    }
+    if (!plan) throw new ApiError(404, "Workout plan not found.");
 
-    // Check if plan is linked to any active assignments
-    const activeAssignments = await prisma.clientTrainerAssignment.findFirst({
-      where: { workoutPlanId: id, active: true },
-    });
-
-    if (activeAssignments) {
-      throw new ApiError(
-        409,
-        "Cannot delete a workout plan that is linked to an active assignment."
-      );
-    }
-
-    // Delete the file from disk if it exists
-    if (plan.fileUrl) {
-      const filename = plan.fileUrl.split("/uploads/workout-plans/")[1];
-      const filePath = `uploads/workout-plans/${filename}`;
-      if (filename && fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-      }
+    // Delete file from Cloudinary first
+    if (plan.filePublicId) {
+      await cloudinary.uploader.destroy(plan.filePublicId, {
+        resource_type: "raw",
+      }).catch(() => {}); // don't block DB deletion if Cloudinary fails
     }
 
     await prisma.workoutPlan.delete({ where: { id } });
@@ -603,7 +598,6 @@ export const getClientSessions = async (req, res, next) => {
         OR: [{ endDate: null }, { endDate: { gte: now } }],
       },
     });
-    console.log("allowances raw:", JSON.stringify(allowances, null, 2));
  
     const allowancesWithUsage = await Promise.all(
       allowances.map(async (allowance) => {

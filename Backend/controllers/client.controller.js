@@ -169,7 +169,7 @@ export const getMyAllowances = async (req, res, next) => {
       },
       orderBy: { createdAt: "desc" },
     });
- 
+
     // No limit set — return usage only
     if (allowances.length === 0) {
       return res.json({
@@ -199,6 +199,7 @@ const sessionsUsed = await prisma.booking.count({
           id: allowance.id,
           limitType: allowance.limitType,
           maxSessions: allowance.maxSessions,
+          isUnlimited: allowance.isUnlimited,
           startDate: allowance.startDate,
           endDate: allowance.endDate,
           sessionsUsed,
